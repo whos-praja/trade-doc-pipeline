@@ -1,0 +1,41 @@
+{
+  "customer_id": "meridian",
+  "customer_name": "Meridian Imports GmbH",
+  "_comment": "One rule set per customer. Copy this file to app/rules/<customer_id>.json and edit. Each field's 'match' is one of: 'exact' (normalized equality), 'fuzzy' (token_set_ratio >= threshold AND all expected words present), or 'format' (regex via 'pattern', or a built-in named 'format' like 'weight'). 'expected' holds the reference value; 'expected_description' is a human-readable label shown for format fields.",
+  "fields": {
+    "consignee_name": {
+      "match": "fuzzy",
+      "expected": "Meridian Imports GmbH"
+    },
+    "hs_code": {
+      "match": "exact",
+      "expected": "6109.10"
+    },
+    "port_of_loading": {
+      "match": "exact",
+      "expected": "Nhava Sheva (INNSA), India"
+    },
+    "port_of_discharge": {
+      "match": "exact",
+      "expected": "Hamburg (DEHAM), Germany"
+    },
+    "incoterms": {
+      "match": "exact",
+      "expected": "FOB Nhava Sheva"
+    },
+    "description_of_goods": {
+      "match": "fuzzy",
+      "expected": "Men's Cotton T-Shirts"
+    },
+    "gross_weight": {
+      "match": "format",
+      "format": "weight",
+      "expected_description": "a number followed by a weight unit, e.g. 1,250.00 KGS"
+    },
+    "invoice_number": {
+      "match": "format",
+      "pattern": "^INV-\\d{4}-\\d{4,5}$",
+      "expected_description": "INV-<4 digits>-<4-5 digits>, e.g. INV-2026-04412"
+    }
+  }
+}

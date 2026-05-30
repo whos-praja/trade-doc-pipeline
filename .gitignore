@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Secrets / environment  (.env.example is intentionally NOT ignored)
+.env
+
+# Databases / local artifacts  (data/samples/ sample PDFs are intentionally kept)
+*.db
+data/pipeline.db
+
+# Notebooks / OS
+.ipynb_checkpoints/
+.DS_Store

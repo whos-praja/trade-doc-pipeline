@@ -1,0 +1,10 @@
+# Trade-document pipeline POC — Python 3.11+
+# Use the CURRENT Google Gen AI SDK (google-genai), NOT the deprecated
+# google-generativeai package.
+google-genai>=1.75.0
+pydantic>=2.7
+pymupdf>=1.24
+python-dotenv>=1.0
+rapidfuzz>=3.0           # deterministic fuzzy matching in the Validator (difflib fallback)
+streamlit>=1.40          # used by the (stubbed) UI
+# SQLite is part of the Python standard library (no dependency needed).
