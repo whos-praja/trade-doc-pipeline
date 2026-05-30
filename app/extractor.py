@@ -83,8 +83,17 @@ _IMAGE_MIME_BY_EXT = {
     ".tiff": "image/tiff",
 }
 
-# HTTP status codes worth retrying.
-_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+# HTTP 5xx statuses worth retrying. (429 is handled specially in _is_retryable:
+# per-minute rate limits are retryable, a per-DAY quota is not.)
+_RETRYABLE_STATUS = {500, 502, 503, 504}
+
+
+class DailyQuotaExhausted(RuntimeError):
+    """Raised (without retrying) on a per-DAY quota 429 (RESOURCE_EXHAUSTED).
+
+    A daily quota cannot recover within our 1/2/4/8s backoff window, so retrying
+    only burns more calls; we fail fast with this clear error instead.
+    """
 
 
 # --- image preparation ------------------------------------------------------
@@ -137,19 +146,44 @@ def _status_code(exc: Exception) -> int | None:
     return status if isinstance(status, int) else None
 
 
+def _is_daily_quota_error(exc: Exception) -> bool:
+    """True iff exc is a per-DAY quota 429 (not a recoverable per-minute limit).
+
+    Google returns HTTP 429 RESOURCE_EXHAUSTED for BOTH per-minute rate limits
+    (recoverable in seconds) and per-day quota exhaustion (not recoverable within
+    our backoff). They are distinguished by the quota id / message naming the
+    window -- "...PerDay..." or "per day" marks the daily quota.
+    """
+    if _status_code(exc) != 429:
+        return False
+    haystack = " ".join(str(part) for part in (
+        getattr(exc, "message", "") or "",
+        getattr(exc, "status", "") or "",
+        getattr(exc, "details", "") or "",
+        exc,  # str(exc) carries the full RESOURCE_EXHAUSTED payload, incl. the quota id
+    )).lower().replace("-", " ")
+    return "perday" in haystack or "per day" in haystack
+
+
 def _is_retryable(exc: Exception) -> bool:
-    """True for 429 / 5xx API errors and transient network failures."""
+    """Retryable: 5xx ServerError, per-MINUTE rate-limit 429s, and transient
+    network failures. NOT retryable: a per-DAY quota 429 (we fail fast instead)."""
     if isinstance(exc, genai_errors.ServerError):
         return True
     if isinstance(exc, genai_errors.APIError):  # ClientError is a subclass
-        return _status_code(exc) in _RETRYABLE_STATUS
+        code = _status_code(exc)
+        if code == 429:
+            # Retry a per-minute rate limit; never retry a per-day quota.
+            return not _is_daily_quota_error(exc)
+        return code in _RETRYABLE_STATUS
     if isinstance(exc, (httpx.TimeoutException, httpx.TransportError, ConnectionError, TimeoutError)):
         return True
     return False
 
 
 def _generate_with_retry(client: genai.Client, parts: list[types.Part]) -> types.GenerateContentResponse:
-    """Call Gemini with exponential backoff on 429 / transient errors."""
+    """Call Gemini with 1/2/4/8s backoff on 5xx, per-minute-429 and transient
+    errors; fail fast (no retry) on a per-DAY quota 429 via DailyQuotaExhausted."""
     contents = [*parts, EXTRACTION_PROMPT]
     gen_config = types.GenerateContentConfig(
         response_mime_type="application/json",
@@ -168,6 +202,14 @@ def _generate_with_retry(client: genai.Client, parts: list[types.Part]) -> types
             )
         except Exception as exc:  # noqa: BLE001 - we re-raise unless retryable
             last_exc = exc
+            if _is_daily_quota_error(exc):
+                # Per-day quota won't recover within the backoff window; retrying
+                # only burns more calls. Fail fast with a clear, actionable error.
+                raise DailyQuotaExhausted(
+                    "Gemini daily quota exhausted (HTTP 429 RESOURCE_EXHAUSTED, per-day limit). "
+                    "Retrying will not help until the quota resets (~midnight Pacific); use a key "
+                    "with remaining/paid quota or wait for the reset."
+                ) from exc
             if attempt < len(backoffs) and _is_retryable(exc):
                 delay = backoffs[attempt]
                 logger.warning(
