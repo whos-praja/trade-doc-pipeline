@@ -2,6 +2,7 @@
 # Use the CURRENT Google Gen AI SDK (google-genai), NOT the deprecated
 # google-generativeai package.
 google-genai>=1.75.0
+anthropic>=0.40          # Claude provider (only needed when LLM_PROVIDER=anthropic)
 pydantic>=2.7
 pymupdf>=1.24
 python-dotenv>=1.0

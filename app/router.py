@@ -81,6 +81,10 @@ Discrepancies:
 
 Return ONLY the email text, beginning with the Subject line."""
 
+    if config.LLM_PROVIDER == "anthropic":
+        from app import llm
+        return llm.anthropic_complete(prompt, max_tokens=1024)
+
     client = genai.Client(api_key=config.require_api_key())
     gen_config = types.GenerateContentConfig(temperature=0.3)
     backoffs = config.RETRY_BACKOFFS

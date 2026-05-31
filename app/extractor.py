@@ -32,7 +32,7 @@ from google import genai
 from google.genai import errors as genai_errors
 from google.genai import types
 
-from app import config
+from app import config, llm
 from app.schema import ExtractionResult
 
 logger = logging.getLogger("extractor")
@@ -119,18 +119,23 @@ def _load_image_bytes(path: Path) -> tuple[bytes, str]:
     return path.read_bytes(), mime
 
 
-def _prepare_image_parts(path: Path) -> list[types.Part]:
-    """Turn a PDF or image file into a list of inline image Parts for Gemini."""
+def _render_pages(path: Path) -> list[tuple[bytes, str]]:
+    """Render a document to a provider-agnostic list of (image_bytes, mime_type)."""
     if path.suffix.lower() == ".pdf":
         pngs = _render_pdf_to_pngs(path, config.PDF_RENDER_DPI)
         if not pngs:
             raise ValueError(f"No pages could be rendered from PDF: {path}")
         logger.info("rendered %d page(s) from %s at %d dpi", len(pngs), path.name, config.PDF_RENDER_DPI)
-        return [types.Part.from_bytes(data=png, mime_type="image/png") for png in pngs]
+        return [(png, "image/png") for png in pngs]
 
     data, mime = _load_image_bytes(path)
     logger.info("loaded image %s (%s, %d bytes)", path.name, mime, len(data))
-    return [types.Part.from_bytes(data=data, mime_type=mime)]
+    return [(data, mime)]
+
+
+def _prepare_image_parts(path: Path) -> list[types.Part]:
+    """Turn a PDF or image file into inline image Parts for Gemini."""
+    return [types.Part.from_bytes(data=b, mime_type=m) for b, m in _render_pages(path)]
 
 
 # --- gemini call with retry -------------------------------------------------
@@ -235,6 +240,9 @@ def extract(path: Union[str, Path]) -> ExtractionResult:
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"Document not found: {path}")
+
+    if config.LLM_PROVIDER == "anthropic":
+        return llm.anthropic_extract(_render_pages(path), EXTRACTION_PROMPT)
 
     api_key = config.require_api_key()
     client = genai.Client(api_key=api_key)

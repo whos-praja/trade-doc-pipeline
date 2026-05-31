@@ -96,6 +96,11 @@ def _answer_prompt(question: str, sql: str, rows: list) -> str:
 # --- LLM helper (reuses the daily-quota-aware retry from extractor) ----------
 
 def _llm(prompt: str, schema: Optional[type] = None, temperature: float = 0.0):
+    if config.LLM_PROVIDER == "anthropic":
+        from app import llm
+        text = llm.anthropic_complete(prompt, max_tokens=1024)
+        return schema.model_validate_json(_json_from_text(text)) if schema is not None else text
+
     from google import genai
     from google.genai import types
 
@@ -126,6 +131,16 @@ def _llm(prompt: str, schema: Optional[type] = None, temperature: float = 0.0):
             raise
     assert last_exc is not None
     raise last_exc
+
+
+def _json_from_text(text: str) -> str:
+    """Extract a JSON object from possibly fenced / prose model output."""
+    t = (text or "").strip()
+    if t.startswith("```"):
+        t = re.sub(r"^```[a-zA-Z]*\s*", "", t)
+        t = re.sub(r"\s*```$", "", t).strip()
+    start, end = t.find("{"), t.rfind("}")
+    return t[start:end + 1] if start != -1 and end > start else t
 
 
 # --- guardrails -------------------------------------------------------------
