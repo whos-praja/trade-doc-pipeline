@@ -11,6 +11,7 @@ natural-language questions via app.query.answer_question.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -19,6 +20,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import streamlit as st
+
+# On Streamlit Community Cloud the API key lives in the app's Secrets store (not a
+# .env file). Bridge any secrets into the environment BEFORE app.config reads them.
+try:
+    for _k in ("ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "LLM_PROVIDER", "APP_PASSWORD", "GEMINI_API_KEY"):
+        if _k in st.secrets and not os.environ.get(_k):
+            os.environ[_k] = str(st.secrets[_k])
+except Exception:  # no secrets configured (e.g. local run) -> fall back to .env
+    pass
 
 from app import config, storage
 from app.pipeline import PipelineError, run_pipeline
@@ -49,6 +59,25 @@ def _conf_color(c: float) -> str:
 # --- page -------------------------------------------------------------------
 
 st.set_page_config(page_title="Trade Document Pipeline", layout="wide")
+
+
+def _require_password() -> None:
+    """Optional access gate — active only when APP_PASSWORD is set (e.g. a public deploy)."""
+    pw = os.environ.get("APP_PASSWORD")
+    if not pw or st.session_state.get("_authed"):
+        return
+    st.title("📄 Trade Document Pipeline")
+    entered = st.text_input("Access password", type="password")
+    if entered == pw:
+        st.session_state["_authed"] = True
+        st.rerun()
+    if entered:
+        st.error("Incorrect password.")
+    st.stop()
+
+
+_require_password()
+
 st.title("📄 Trade Document Pipeline")
 st.caption("Extractor → Validator → Router → SQLite, with NL query. Runs the real pipeline; "
            "the agent drafts but never sends.")
