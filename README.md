@@ -86,6 +86,47 @@ what is the most common discrepancy across flagged documents?
 
 NL→SQL is guardrailed (single read-only `SELECT`, auto-`LIMIT`); on any failure it falls back to canned intents.
 
+## Government ID subsystem (`app/gov/`) — consent-gated
+
+A second, self-contained pipeline that reads **government identity documents** (Aadhaar,
+PAN, passport, driving licence, voter ID) **only under explicit, recorded, revocable
+consent**, and stores the least data the stated purpose requires.
+
+> **Read the document before using it:** [`docs/GOVERNMENT_ID_SYSTEM.md`](docs/GOVERNMENT_ID_SYSTEM.md).
+> Reading an ID with a vision model **does not prove the document is genuine**. Where a
+> decision matters, use the issuer instead — UIDAI offline QR (signed, verifiable offline),
+> DigiLocker Issued Documents, or the Protean PAN API. OCR is for documents with no digital
+> route, and always routes to a human when anything is uncertain.
+
+| Module | Role |
+|---|---|
+| `app/gov/schema.py` | Purpose-bound field allowlists. A purpose defines what may be read — `age_verification` cannot read an ID number at all. |
+| `app/gov/consent.py` | HMAC-signed, expiring, withdrawable consent records. `authorise()` is the single gate. |
+| `app/gov/extractor.py` | Vision extraction whose tool schema is **built from the consented fields**, so an un-consented field has no slot to be written into. |
+| `app/gov/verify.py` | **Deterministic, no model.** Aadhaar Verhoeff checksum, ICAO 9303 MRZ check digits, PAN/DL/EPIC structure, date sanity. |
+| `app/gov/redaction.py` | Masking, keyed blind indexing, Fernet encryption. Full Aadhaar storage is refused by construction. |
+| `app/gov/storage.py` | SQLite with retention dates, append-only access log, erasure, subject export. |
+| `app/gov/pipeline.py` | Consent gate → extract → verify → deterministic decide → minimise → store. |
+
+```bash
+export CONSENT_SIGNING_KEY=$(python -c "import secrets; print(secrets.token_urlsafe(48))")
+export BLIND_INDEX_PEPPER=$(python -c "import secrets; print(secrets.token_urlsafe(48))")
+
+python -m app.gov.pipeline --purposes                                     # what may be collected, and why
+python -m app.gov.pipeline --grant --subject user-42 \
+    --purpose age_verification --doc-type aadhaar                         # → cns_...
+python -m app.gov.pipeline --process card.jpg --consent cns_... \
+    --doc-type aadhaar                                                    # needs ANTHROPIC_API_KEY
+python -m app.gov.pipeline --export user-42                               # subject access request
+python -m app.gov.pipeline --withdraw cns_...                             # withdraw + erase
+python -m app.gov.pipeline --purge                                        # retention job
+
+python -m tests.test_gov                                                  # 31 tests, no API key needed
+```
+
+Design notes, including why there is no trained detection model anywhere in this repo:
+[`docs/HOW_EXTRACTION_WORKS.md`](docs/HOW_EXTRACTION_WORKS.md).
+
 ## Customer rules
 
 Expected values live in **`app/rules/meridian.json`** — one JSON file per customer. Add a customer by
@@ -106,7 +147,19 @@ trade-doc-pipeline/
 │  ├─ storage.py         # SQLite persistence
 │  ├─ pipeline.py        # orchestrator (resumable)  ·  python -m app.pipeline
 │  ├─ query.py           # NL → SQL query agent
-│  └─ rules/meridian.json
+│  ├─ rules/meridian.json
+│  └─ gov/               # consent-gated government ID subsystem
+│     ├─ schema.py       #   purposes → allowed fields (data minimisation)
+│     ├─ consent.py      #   signed, expiring, withdrawable consent records
+│     ├─ extractor.py    #   vision extraction scoped to consented fields
+│     ├─ verify.py       #   deterministic checks (Verhoeff, MRZ, formats)
+│     ├─ redaction.py    #   masking, blind index, encryption at rest
+│     ├─ storage.py      #   retention, audit log, erasure, subject export
+│     └─ pipeline.py     #   orchestrator  ·  python -m app.gov.pipeline
+├─ docs/
+│  ├─ HOW_EXTRACTION_WORKS.md    # how the vision extraction is built
+│  └─ GOVERNMENT_ID_SYSTEM.md    # consent design + legal constraints
+├─ tests/test_gov.py     # 31 tests for the ID subsystem (no API key needed)
 ├─ ui/streamlit_app.py   # Streamlit UI (main entry)
 ├─ data/samples/         # sample documents
 ├─ run_extractor.py  run_validator.py  run_router.py  run_query.py

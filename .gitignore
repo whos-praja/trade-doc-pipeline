@@ -13,6 +13,7 @@ env/
 # Databases / local artifacts  (data/samples/ sample PDFs are intentionally kept)
 *.db
 data/pipeline.db
+data/gov.db
 
 # Notebooks / OS
 .ipynb_checkpoints/
